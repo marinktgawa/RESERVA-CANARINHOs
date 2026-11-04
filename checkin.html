@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Check-in </title>
+      <link rel="stylesheet" href="css/style.css">
+    <script src="js/script.js" defer></script>
+</head>
+<body>
+       <header class="topo">
+        <a class="marca" href="index.html"> Reserva Canarinho</a>
+
+        <nav>
+            <a href="index.html">Início</a>
+            <a href="mesas.html">Mesas</a>
+            <a href="pagamento.html">Caução</a>
+        </nav>
+    </header>
+
+    <main class="container estreito">
+        <a class="voltar" href="mesas.html">← Voltar para as mesas</a>
+
+        <section class="cartao">
+            <h1>Check-in da reserva</h1>
+
+            <p class="muted">
+                Informe o código que aparece na sua reserva.
+                O check-in fica disponível até 30 minutos antes
+                do horário do jogo.
+            </p>
+
+            <form id="formCheckin">
+                <label for="codigoCheckin">Código da reserva</label>
+
+                <input
+                    id="codigoCheckin"
+                    required
+                    placeholder="Ex.: CANA-123456"
+                >
+
+                <button class="botao largura-total" type="submit">
+                    Confirmar check-in
+                </button>
+            </form>
+
+            <p id="mensagemCheckin" class="mensagem"
+               aria-live="polite"></p>
+
+            <div class="alerta">
+                <strong>Regra No-Show:</strong>
+                reservas pagas sem check-in até 30 minutos antes
+                do início são canceladas automaticamente.
+                Nesta versão, a verificação ocorre quando o sistema
+                é aberto ou uma página é atualizada.
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        Reserva Canarinho · GS
+    </footer>
+</body>
+</html>

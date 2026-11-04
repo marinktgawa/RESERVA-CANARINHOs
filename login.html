@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+     <link rel="stylesheet" href="css/style.css">
+    <script src="js/script.js" defer></script>
+</head>
+<body>
+        <header class="topo">
+        <a class="marca" href="index.html">Reserva Canarinho</a>
+
+        <nav>
+            <a href="index.html">Início</a>
+            <a href="mesas.html">Mesas</a>
+            <a href="clientes.html">Cadastro</a>
+        </nav>
+    </header>
+
+    <main class="container estreito">
+        <a class="voltar" href="index.html">← Voltar ao início</a>
+
+        <section class="cartao">
+            <h1>Entrar no sistema</h1>
+
+            <p class="muted">
+                Use o e-mail e a senha cadastrados neste navegador.
+            </p>
+
+            <form id="formLogin">
+                <label for="emailLogin">E-mail</label>
+                <input
+                    id="emailLogin"
+                    type="email"
+                    required
+                    placeholder="voce@email.com"
+                >
+
+                <label for="senhaLogin">Senha</label>
+                <input
+                    id="senhaLogin"
+                    type="password"
+                    required
+                    placeholder="Sua senha"
+                >
+
+                <button class="botao largura-total" type="submit">
+                    Entrar
+                </button>
+            </form>
+
+            <p id="mensagemLogin" class="mensagem" aria-live="polite"></p>
+
+            <p>
+                Ainda não tem cadastro?
+                <a href="clientes.html">Cadastre-se aqui</a>.
+            </p>
+        </section>
+    </main>
+
+    <footer>
+        Reserva Canarinho · GS
+    </footer>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cadastro de clientes</title>
+        <link rel="stylesheet" href="css/style.css">
+    <script src="js/script.js" defer></script>
+</head>
+<body>
+       <header class="topo">
+        <a class="marca" href="index.html"> Reserva Canarinho</a>
+
+        <nav>
+            <a href="index.html">Início</a>
+            <a href="mesas.html">Mesas</a>
+            <a href="pagamento.html">Caução</a>
+        </nav>
+    </header>
+
+    <main class="container estreito">
+        <a class="voltar" href="index.html">← Voltar ao início</a>
+
+        <section class="cartao">
+            <h1>Cadastro de cliente</h1>
+
+            <p class="muted">
+                Preencha os dados para poder reservar uma mesa.
+            </p>
+
+            <form id="formCadastro">
+                <label for="nome">Nome completo</label>
+                <input
+                    id="nome"
+                    required
+                    maxlength="80"
+                    placeholder="Seu nome"
+                >
+
+                <label for="email">E-mail</label>
+                <input
+                    id="email"
+                    type="email"
+                    required
+                    placeholder="voce@email.com"
+                >
+
+                <label for="telefone">Telefone</label>
+                <input
+                    id="telefone"
+                    type="tel"
+                    required
+                    placeholder="(81) 99999-9999"
+                >
+
+                <label for="senha">Criar senha</label>
+                <input
+                    id="senha"
+                    type="password"
+                    required
+                    minlength="4"
+                    placeholder="Mínimo de 4 caracteres"
+                >
+
+                <button class="botao largura-total" type="submit">
+                    Cadastrar
+                </button>
+            </form>
+
+            <p id="mensagemCadastro" class="mensagem" aria-live="polite"></p>
+
+            <p>
+                Já possui cadastro?
+                <a href="login.html">Entrar</a>.
+            </p>
+        </section>
+    </main>
+
+    <footer>
+        Reserva Canarinho · GS
+    </footer>
+</body>
+</html>
