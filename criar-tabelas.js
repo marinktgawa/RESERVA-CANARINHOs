@@ -6,8 +6,8 @@ const pool = require("./database");
 
 async function criarTabelas() {
     try {
-        const sql = fs.readFileSync("./schema.sql", "utf8");
-
+        const path = require("path");
+const sql = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
         await pool.query(sql);
 
         console.log("Tabelas criadas com sucesso!");
