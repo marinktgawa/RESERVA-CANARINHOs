@@ -435,27 +435,51 @@ function atualizarReservas() {
 }
 
 // ==========================================
-// LISTA DE ESPERA
-// TEMPORARIAMENTE LOCAL
+// LISTA DE ESPERA - POSTGRESQL
 // ==========================================
 
-function atualizarEspera() {
+async function atualizarEspera() {
     const lista = document.getElementById("listaEspera");
 
     if (!lista) return;
 
-    const espera = ler(CHAVE_ESPERA);
+    const token = obterToken();
 
-    if (espera.length === 0) {
-        lista.innerHTML = "<li>Ninguém na lista de espera.</li>";
+    if (!token) {
+        lista.innerHTML = "<li>Faça login para consultar a lista de espera.</li>";
         return;
     }
 
-    lista.innerHTML = espera.map((item, indice) => `
-        <li>
-            ${indice + 1}. ${escapar(item.email)}
-        </li>
-    `).join("");
+    try {
+        const resposta = await fetch("/api/lista-espera", {
+            headers: {
+                "Authorization": `Bearer ${token}`
+            }
+        });
+
+        const dados = await resposta.json();
+
+        if (!resposta.ok) {
+            lista.innerHTML = "<li>Não foi possível carregar a lista de espera.</li>";
+            return;
+        }
+
+        if (dados.length === 0) {
+            lista.innerHTML = "<li>Ninguém na lista de espera.</li>";
+            return;
+        }
+
+        lista.innerHTML = dados.map((item, indice) => `
+            <li>
+                ${indice + 1}. ${escapar(item.nome)}
+            </li>
+        `).join("");
+
+    } catch (erro) {
+        console.error("Erro ao consultar lista de espera:", erro);
+
+        lista.innerHTML = "<li>Erro ao conectar com o servidor.</li>";
+    }
 }
 
 // ==========================================
@@ -729,63 +753,83 @@ if (formCheckin) {
     });
 }
 
+
 // ==========================================
-// FORMULÁRIO DA LISTA DE ESPERA
-// TEMPORARIAMENTE LOCAL
+// FORMULÁRIO DA LISTA DE ESPERA - POSTGRESQL
 // ==========================================
 
 const formEspera = document.getElementById("formEspera");
 
 if (formEspera) {
-    formEspera.addEventListener("submit", function(event) {
+    formEspera.addEventListener("submit", async function(event) {
         event.preventDefault();
 
         const email = document.getElementById("emailEspera")
             .value.trim().toLowerCase();
 
-        if (!clienteExiste(email)) {
+        const token = obterToken();
+        const cliente = obterClienteLogado();
+
+        if (!token || !cliente) {
             mensagem(
                 "mensagemEspera",
-                "Cliente não cadastrado. Faça o cadastro primeiro.",
+                "Faça login antes de entrar na lista de espera.",
                 "erro"
             );
             return;
         }
 
-        const espera = ler(CHAVE_ESPERA);
-
-        const jaExiste = espera.some(
-            item => item.email.toLowerCase() === email
-        );
-
-        if (jaExiste) {
+        if (email !== cliente.email.toLowerCase()) {
             mensagem(
                 "mensagemEspera",
-                "Este cliente já está na lista de espera.",
+                "Informe o e-mail da conta que está conectada.",
                 "erro"
             );
             return;
         }
 
-        espera.push({
-            email,
-            entrouEm: new Date().toISOString()
-        });
+        try {
+            const resposta = await fetch("/api/lista-espera", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({ email })
+            });
 
-        salvar(CHAVE_ESPERA, espera);
+            const dados = await resposta.json();
 
-        mensagem(
-            "mensagemEspera",
-            "Cliente adicionado à lista de espera!",
-            "sucesso"
-        );
+            if (!resposta.ok) {
+                mensagem(
+                    "mensagemEspera",
+                    dados.erro || "Não foi possível entrar na lista.",
+                    "erro"
+                );
+                return;
+            }
 
-        formEspera.reset();
+            mensagem(
+                "mensagemEspera",
+                dados.mensagem,
+                "sucesso"
+            );
 
-        atualizarEspera();
+            formEspera.reset();
+
+            await atualizarEspera();
+
+        } catch (erro) {
+            console.error("Erro ao entrar na lista de espera:", erro);
+
+            mensagem(
+                "mensagemEspera",
+                "Não foi possível conectar ao servidor.",
+                "erro"
+            );
+        }
     });
 }
-
 // ==========================================
 // COPIAR CHAVE PIX DEMONSTRATIVA
 // ==========================================
@@ -828,10 +872,10 @@ document.addEventListener("DOMContentLoaded", async function() {
         await carregarReservasServidor();
     }
 
-    atualizarReservas();
-    atualizarEspera();
+  atualizarReservas();
+await atualizarEspera();
 
-    await atualizarMapa();
+await atualizarMapa();
 
     // Atualiza o mapa a cada 15 segundos.
     // O servidor também verifica os No-Shows vencidos.

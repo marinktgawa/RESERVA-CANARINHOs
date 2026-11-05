@@ -640,6 +640,94 @@ app.post("/api/checkin", autenticarToken, async (req, res) => {
 // PÁGINAS INEXISTENTES
 // ==========================================
 
+// ==========================================
+// LISTA DE ESPERA - POSTGRESQL
+// ==========================================
+
+// CONSULTAR LISTA DE ESPERA
+app.get("/api/lista-espera", autenticarToken, async (req, res) => {
+    try {
+        const resultado = await pool.query(`
+            SELECT
+                c.nome,
+                e.entrou_em
+            FROM lista_espera e
+            INNER JOIN clientes c
+                ON c.id = e.cliente_id
+            ORDER BY e.entrou_em ASC
+        `);
+
+        res.json(resultado.rows);
+
+    } catch (erro) {
+        console.error("Erro ao consultar lista de espera:", erro);
+
+        res.status(500).json({
+            erro: "Erro ao consultar a lista de espera."
+        });
+    }
+});
+
+// ADICIONAR CLIENTE À LISTA DE ESPERA
+app.post("/api/lista-espera", autenticarToken, async (req, res) => {
+    try {
+        const email = String(req.body.email || "")
+            .trim()
+            .toLowerCase();
+
+        if (!email) {
+            return res.status(400).json({
+                erro: "Informe o e-mail."
+            });
+        }
+
+        // Confere se o e-mail pertence à conta conectada.
+        const cliente = await pool.query(
+            `SELECT id, email
+             FROM clientes
+             WHERE id = $1`,
+            [req.cliente.id]
+        );
+
+        if (cliente.rows.length === 0) {
+            return res.status(404).json({
+                erro: "Cliente não encontrado."
+            });
+        }
+
+        if (cliente.rows[0].email.toLowerCase() !== email) {
+            return res.status(403).json({
+                erro: "Informe o e-mail da conta que está conectada."
+            });
+        }
+
+        const resultado = await pool.query(
+            `INSERT INTO lista_espera (cliente_id)
+             VALUES ($1)
+             ON CONFLICT (cliente_id) DO NOTHING
+             RETURNING id`,
+            [req.cliente.id]
+        );
+
+        if (resultado.rows.length === 0) {
+            return res.status(409).json({
+                erro: "Este cliente já está na lista de espera."
+            });
+        }
+
+        res.status(201).json({
+            mensagem: "Cliente adicionado à lista de espera!"
+        });
+
+    } catch (erro) {
+        console.error("Erro ao adicionar à lista de espera:", erro);
+
+        res.status(500).json({
+            erro: "Erro ao adicionar cliente à lista de espera."
+        });
+    }
+});
+
 app.use((req, res) => {
     res.status(404).send("Página não encontrada.");
 });
