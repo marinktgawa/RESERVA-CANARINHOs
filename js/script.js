@@ -2,7 +2,8 @@
 // ==========================================
 // RESERVA CANARINHO
 // Cadastro, login, reservas e mesas no PostgreSQL
-// Pagamento, check-in e espera temporariamente locais
+// Pagamento no PostgreSQL
+// Check-in e lista de espera temporariamente locais
 // ==========================================
 
 const CHAVE_CLIENTES = "canarinho_clientes";
@@ -236,6 +237,7 @@ if (formLogin) {
 
 // ==========================================
 // CARREGAR RESERVAS DO POSTGRESQL
+// POSTGRESQL É A FONTE PRINCIPAL DOS DADOS
 // ==========================================
 
 async function carregarReservasServidor() {
@@ -266,29 +268,35 @@ async function carregarReservasServidor() {
             return false;
         }
 
-        const reservasAntigas = ler(CHAVE_RESERVAS);
+        // Não utiliza mais o status antigo do localStorage.
+        // O status e o check-in vêm diretamente do PostgreSQL.
 
         const reservasAtualizadas = dados.map(reserva => {
-            // Preserva temporariamente os dados locais de pagamento
-            // e check-in até migrarmos essas funções para o banco.
-            const reservaLocal = reservasAntigas.find(
-                item => item.codigo === reserva.codigo
-            );
-
             return {
                 codigo: reserva.codigo,
                 email: obterClienteLogado()?.email || "",
                 mesa: reserva.mesa_numero,
                 data: reserva.data_reserva,
-                status: reservaLocal?.status || reserva.status,
-                checkin: reservaLocal?.checkin || reserva.checkin,
-                criadoEm: reservaLocal?.criadoEm || "",
-                pagoEm: reservaLocal?.pagoEm || null,
-                checkinEm: reservaLocal?.checkinEm || null,
+
+                status: reserva.status,
+                checkin: Boolean(reserva.checkin),
+
+                criadoEm: reserva.criado_em || "",
+                pagoEm: reserva.pago_em || null,
+                checkinEm: reserva.checkin_em || null,
+
                 reembolso: Number(reserva.reembolso || 0),
-                percentualReembolso: PERCENTUAL_REEMBOLSO,
+                percentualReembolso: Number(
+                    reserva.percentual_reembolso ?? PERCENTUAL_REEMBOLSO
+                ),
+
                 valorRetido: Number(reserva.valor_retido || 0),
-                percentualRetido: PERCENTUAL_RETIDO
+                percentualRetido: Number(
+                    reserva.percentual_retido ?? PERCENTUAL_RETIDO
+                ),
+
+                canceladaEm: reserva.cancelada_em || null,
+                motivo: reserva.motivo || ""
             };
         });
 
@@ -605,6 +613,7 @@ if (formReserva) {
         }
     });
 }
+
 // ==========================================
 // FORMULÁRIO DE PAGAMENTO
 // CAUÇÃO DEMONSTRATIVA DE R$ 30,00
@@ -667,9 +676,17 @@ if (formPagamento) {
 
             formPagamento.reset();
 
-            await carregarReservasServidor();
+            const carregou = await carregarReservasServidor();
 
-            atualizarReservas();
+            if (carregou) {
+                atualizarReservas();
+            } else {
+                mensagem(
+                    "mensagemPagamento",
+                    "Pagamento confirmado, mas não foi possível atualizar a lista. Atualize a página.",
+                    "erro"
+                );
+            }
 
         } catch (erro) {
             console.error("Erro no pagamento:", erro);
@@ -861,10 +878,8 @@ document.addEventListener("DOMContentLoaded", async function() {
     await atualizarMapa();
 
     // Atualizar o mapa a cada 15 segundos
-    // As reservas são carregadas do banco ao abrir a página.
     setInterval(async function() {
         await atualizarMapa();
-
     }, 15000);
 
     // Atualizar seleção quando o usuário escolher uma mesa
