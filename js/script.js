@@ -1,9 +1,9 @@
 
 // ==========================================
 // RESERVA CANARINHO
-// Cadastro, login, reservas e mesas no PostgreSQL
-// Pagamento no PostgreSQL
-// Check-in e lista de espera temporariamente locais
+// Cadastro, login, reservas, pagamento e check-in
+// PostgreSQL
+// Lista de espera temporariamente local
 // ==========================================
 
 const CHAVE_CLIENTES = "canarinho_clientes";
@@ -14,7 +14,6 @@ const TOTAL_MESAS = 10;
 const VALOR_CAUCao = 30;
 const PERCENTUAL_REEMBOLSO = 90;
 const PERCENTUAL_RETIDO = 10;
-const PRAZO_CHECKIN = 30 * 60 * 1000;
 
 // ==========================================
 // FUNÇÕES GERAIS
@@ -237,7 +236,7 @@ if (formLogin) {
 
 // ==========================================
 // CARREGAR RESERVAS DO POSTGRESQL
-// POSTGRESQL É A FONTE PRINCIPAL DOS DADOS
+// O BANCO É A FONTE PRINCIPAL DOS DADOS
 // ==========================================
 
 async function carregarReservasServidor() {
@@ -267,9 +266,6 @@ async function carregarReservasServidor() {
 
             return false;
         }
-
-        // Não utiliza mais o status antigo do localStorage.
-        // O status e o check-in vêm diretamente do PostgreSQL.
 
         const reservasAtualizadas = dados.map(reserva => {
             return {
@@ -307,51 +303,6 @@ async function carregarReservasServidor() {
     } catch (erro) {
         console.error("Erro ao carregar reservas:", erro);
         return false;
-    }
-}
-
-// ==========================================
-// RESERVAS
-// ==========================================
-
-function reservaAtivaMesa(numero) {
-    return ler(CHAVE_RESERVAS).some(reserva =>
-        Number(reserva.mesa) === Number(numero) &&
-        ["Pendente", "Paga", "Check-in realizado"].includes(reserva.status)
-    );
-}
-
-function verificarNoShow() {
-    const reservas = ler(CHAVE_RESERVAS);
-    const agora = Date.now();
-
-    let alterou = false;
-
-    reservas.forEach(reserva => {
-        if (reserva.status !== "Paga" || reserva.checkin) {
-            return;
-        }
-
-        const limite =
-            new Date(reserva.data).getTime() + PRAZO_CHECKIN;
-
-        if (agora > limite) {
-            reserva.status = "Cancelada por No-Show";
-            reserva.reembolso = 27;
-            reserva.percentualReembolso = PERCENTUAL_REEMBOLSO;
-            reserva.valorRetido = 3;
-            reserva.percentualRetido = PERCENTUAL_RETIDO;
-            reserva.canceladaEm = new Date().toISOString();
-
-            reserva.motivo =
-                "Cliente não realizou o check-in dentro do prazo.";
-
-            alterou = true;
-        }
-    });
-
-    if (alterou) {
-        salvar(CHAVE_RESERVAS, reservas);
     }
 }
 
@@ -453,6 +404,7 @@ function atualizarReservas() {
                     <p>Cliente: ${escapar(reserva.email)}</p>
                     <p>Data: ${escapar(dataLegivel(reserva.data))}</p>
                     <p>Status: ${escapar(reserva.status)}</p>
+
                     ${
                         reserva.status === "Cancelada por No-Show"
                         ? `<p>Reembolso: R$ ${Number(reserva.reembolso).toFixed(2).replace(".", ",")}</p>
@@ -484,6 +436,7 @@ function atualizarReservas() {
 
 // ==========================================
 // LISTA DE ESPERA
+// TEMPORARIAMENTE LOCAL
 // ==========================================
 
 function atualizarEspera() {
@@ -615,9 +568,8 @@ if (formReserva) {
 }
 
 // ==========================================
-// FORMULÁRIO DE PAGAMENTO
+// FORMULÁRIO DE PAGAMENTO - POSTGRESQL
 // CAUÇÃO DEMONSTRATIVA DE R$ 30,00
-// POSTGRESQL
 // ==========================================
 
 const formPagamento = document.getElementById("formPagamento");
@@ -676,17 +628,9 @@ if (formPagamento) {
 
             formPagamento.reset();
 
-            const carregou = await carregarReservasServidor();
+            await carregarReservasServidor();
 
-            if (carregou) {
-                atualizarReservas();
-            } else {
-                mensagem(
-                    "mensagemPagamento",
-                    "Pagamento confirmado, mas não foi possível atualizar a lista. Atualize a página.",
-                    "erro"
-                );
-            }
+            atualizarReservas();
 
         } catch (erro) {
             console.error("Erro no pagamento:", erro);
@@ -701,73 +645,87 @@ if (formPagamento) {
 }
 
 // ==========================================
-// CHECK-IN
-// TEMPORARIAMENTE LOCAL
+// CHECK-IN - POSTGRESQL
 // ==========================================
 
 const formCheckin = document.getElementById("formCheckin");
 
 if (formCheckin) {
-    formCheckin.addEventListener("submit", function(event) {
+    formCheckin.addEventListener("submit", async function(event) {
         event.preventDefault();
 
         const codigo = document.getElementById("codigoCheckin")
             .value.trim().toUpperCase();
 
-        const reservas = ler(CHAVE_RESERVAS);
+        const token = obterToken();
 
-        const reserva = reservas.find(
-            item => item.codigo.toUpperCase() === codigo
-        );
-
-        if (!reserva) {
+        if (!token) {
             mensagem(
                 "mensagemCheckin",
-                "Código de reserva não encontrado.",
+                "Faça login antes de realizar o check-in.",
                 "erro"
             );
             return;
         }
 
-        if (reserva.status !== "Paga") {
+        if (!codigo) {
             mensagem(
                 "mensagemCheckin",
-                "A reserva precisa estar paga para realizar o check-in.",
+                "Informe o código da reserva.",
                 "erro"
             );
             return;
         }
 
-        const limite =
-            new Date(reserva.data).getTime() + PRAZO_CHECKIN;
+        try {
+            const resposta = await fetch("/api/checkin", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({ codigo })
+            });
 
-        if (Date.now() > limite) {
+            const dados = await resposta.json();
+
+            if (!resposta.ok) {
+                mensagem(
+                    "mensagemCheckin",
+                    dados.erro || "Não foi possível realizar o check-in.",
+                    "erro"
+                );
+
+                // Atualiza a lista caso a reserva tenha virado No-Show.
+                await carregarReservasServidor();
+                atualizarReservas();
+                await atualizarMapa();
+
+                return;
+            }
+
             mensagem(
                 "mensagemCheckin",
-                "O prazo para check-in terminou.",
-                "erro"
+                dados.mensagem,
+                "sucesso"
             );
 
-            verificarNoShow();
+            formCheckin.reset();
+
+            await carregarReservasServidor();
+
             atualizarReservas();
-            return;
+            await atualizarMapa();
+
+        } catch (erro) {
+            console.error("Erro no check-in:", erro);
+
+            mensagem(
+                "mensagemCheckin",
+                "Não foi possível conectar ao servidor.",
+                "erro"
+            );
         }
-
-        reserva.checkin = true;
-        reserva.status = "Check-in realizado";
-        reserva.checkinEm = new Date().toISOString();
-
-        salvar(CHAVE_RESERVAS, reservas);
-
-        mensagem(
-            "mensagemCheckin",
-            "Check-in realizado com sucesso!",
-            "sucesso"
-        );
-
-        formCheckin.reset();
-
-        atualizarReservas();
     });
 }
 
@@ -870,19 +828,19 @@ document.addEventListener("DOMContentLoaded", async function() {
         await carregarReservasServidor();
     }
 
-    verificarNoShow();
-
     atualizarReservas();
     atualizarEspera();
 
     await atualizarMapa();
 
-    // Atualizar o mapa a cada 15 segundos
+    // Atualiza o mapa a cada 15 segundos.
+    // O servidor também verifica os No-Shows vencidos.
     setInterval(async function() {
         await atualizarMapa();
+
     }, 15000);
 
-    // Atualizar seleção quando o usuário escolher uma mesa
+    // Atualizar seleção quando o usuário escolher uma mesa.
     const selectMesa = document.getElementById("mesaReserva");
 
     if (selectMesa) {

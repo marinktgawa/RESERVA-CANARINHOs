@@ -11,19 +11,24 @@ const pool = require("./database");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Verificar configurações obrigatórias
+// ==========================================
+// CONFIGURAÇÕES
+// ==========================================
+
 if (!process.env.DATABASE_URL || !process.env.JWT_SECRET) {
     console.error("ERRO: Configure DATABASE_URL e JWT_SECRET no .env");
     process.exit(1);
 }
 
-// Configurações do servidor
 app.use(express.json());
 
 app.use("/css", express.static(path.join(__dirname, "css")));
 app.use("/js", express.static(path.join(__dirname, "js")));
 
-// Páginas do site
+// ==========================================
+// PÁGINAS DO SITE
+// ==========================================
+
 const paginas = [
     "index.html",
     "clientes.html",
@@ -47,7 +52,10 @@ app.get("/:pagina", (req, res, next) => {
     next();
 });
 
+// ==========================================
 // AUTENTICAÇÃO
+// ==========================================
+
 function autenticarToken(req, res, next) {
     const cabecalho = req.headers.authorization;
 
@@ -73,7 +81,41 @@ function autenticarToken(req, res, next) {
     }
 }
 
+// ==========================================
+// VERIFICAR E REGISTRAR NO-SHOW
+// PRAZO: 30 MINUTOS APÓS O HORÁRIO DA RESERVA
+// ==========================================
+
+async function atualizarNoShows(conexao = pool, clienteId = null) {
+    const parametros = [];
+    let filtroCliente = "";
+
+    if (clienteId !== null) {
+        parametros.push(clienteId);
+        filtroCliente = "AND cliente_id = $1";
+    }
+
+    await conexao.query(
+        `UPDATE reservas
+         SET status = 'Cancelada por No-Show',
+             reembolso = 27.00,
+             percentual_reembolso = 90.00,
+             valor_retido = 3.00,
+             percentual_retido = 10.00,
+             cancelada_em = CURRENT_TIMESTAMP,
+             motivo = 'Cliente não realizou o check-in dentro do prazo.'
+         WHERE status = 'Paga'
+           AND checkin = FALSE
+           AND data_reserva + INTERVAL '30 minutes' < CURRENT_TIMESTAMP
+           ${filtroCliente}`,
+        parametros
+    );
+}
+
+// ==========================================
 // TESTAR SERVIDOR E BANCO
+// ==========================================
+
 app.get("/api/health", async (req, res) => {
     try {
         await pool.query("SELECT NOW()");
@@ -91,7 +133,10 @@ app.get("/api/health", async (req, res) => {
     }
 });
 
+// ==========================================
 // CADASTRO DE CLIENTES
+// ==========================================
+
 app.post("/api/clientes", async (req, res) => {
     try {
         const { nome, email, telefone, senha } = req.body;
@@ -157,7 +202,10 @@ app.post("/api/clientes", async (req, res) => {
     }
 });
 
+// ==========================================
 // LOGIN DE CLIENTES
+// ==========================================
+
 app.post("/api/login", async (req, res) => {
     try {
         const { email, senha } = req.body;
@@ -205,7 +253,7 @@ app.post("/api/login", async (req, res) => {
 
         res.json({
             mensagem: "Login realizado com sucesso!",
-            token: token,
+            token,
             cliente: {
                 id: cliente.id,
                 nome: cliente.nome,
@@ -223,9 +271,15 @@ app.post("/api/login", async (req, res) => {
     }
 });
 
+// ==========================================
 // CONSULTAR MESAS
+// ==========================================
+
 app.get("/api/mesas", async (req, res) => {
     try {
+        // Libera mesas de reservas vencidas por No-Show.
+        await atualizarNoShows();
+
         const resultado = await pool.query(`
             SELECT
                 m.numero,
@@ -255,9 +309,14 @@ app.get("/api/mesas", async (req, res) => {
     }
 });
 
+// ==========================================
 // CONSULTAR RESERVAS DO CLIENTE LOGADO
+// ==========================================
+
 app.get("/api/reservas", autenticarToken, async (req, res) => {
     try {
+        await atualizarNoShows(pool, req.cliente.id);
+
         const resultado = await pool.query(
             `SELECT
                 id,
@@ -266,8 +325,15 @@ app.get("/api/reservas", autenticarToken, async (req, res) => {
                 data_reserva,
                 status,
                 checkin,
+                criado_em,
+                pago_em,
+                checkin_em,
                 reembolso,
-                valor_retido
+                percentual_reembolso,
+                valor_retido,
+                percentual_retido,
+                cancelada_em,
+                motivo
              FROM reservas
              WHERE cliente_id = $1
              ORDER BY data_reserva DESC`,
@@ -285,7 +351,10 @@ app.get("/api/reservas", autenticarToken, async (req, res) => {
     }
 });
 
+// ==========================================
 // CRIAR RESERVA
+// ==========================================
+
 app.post("/api/reservas", autenticarToken, async (req, res) => {
     try {
         const { mesa_numero, data_reserva } = req.body;
@@ -361,16 +430,18 @@ app.post("/api/reservas", autenticarToken, async (req, res) => {
     }
 });
 
-// ROTA PARA PÁGINAS INEXISTENTES
 // ==========================================
-// CONFIRMAR PAGAMENTO - POSTGRESQL
+// CONFIRMAR PAGAMENTO
 // CAUÇÃO DEMONSTRATIVA DE R$ 30,00
 // ==========================================
 
 app.post("/api/pagamentos", autenticarToken, async (req, res) => {
-    const conexao = await pool.connect();
+    let conexao;
+    let transacaoIniciada = false;
 
     try {
+        conexao = await pool.connect();
+
         const { codigo } = req.body;
 
         if (!codigo) {
@@ -380,6 +451,7 @@ app.post("/api/pagamentos", autenticarToken, async (req, res) => {
         }
 
         await conexao.query("BEGIN");
+        transacaoIniciada = true;
 
         const resultado = await conexao.query(
             `SELECT id, status
@@ -392,6 +464,7 @@ app.post("/api/pagamentos", autenticarToken, async (req, res) => {
 
         if (resultado.rows.length === 0) {
             await conexao.query("ROLLBACK");
+            transacaoIniciada = false;
 
             return res.status(404).json({
                 erro: "Reserva não encontrada."
@@ -402,6 +475,7 @@ app.post("/api/pagamentos", autenticarToken, async (req, res) => {
 
         if (reserva.status !== "Pendente") {
             await conexao.query("ROLLBACK");
+            transacaoIniciada = false;
 
             return res.status(400).json({
                 erro: "Esta reserva não está pendente de pagamento."
@@ -429,13 +503,16 @@ app.post("/api/pagamentos", autenticarToken, async (req, res) => {
         );
 
         await conexao.query("COMMIT");
+        transacaoIniciada = false;
 
         res.json({
             mensagem: "Caução demonstrativa de R$ 30,00 confirmada com sucesso!"
         });
 
     } catch (erro) {
-        await conexao.query("ROLLBACK");
+        if (conexao && transacaoIniciada) {
+            await conexao.query("ROLLBACK");
+        }
 
         console.error(erro);
 
@@ -444,14 +521,133 @@ app.post("/api/pagamentos", autenticarToken, async (req, res) => {
         });
 
     } finally {
-        conexao.release();
+        if (conexao) {
+            conexao.release();
+        }
     }
 });
+
+// ==========================================
+// REALIZAR CHECK-IN
+// POSTGRESQL
+// ==========================================
+
+app.post("/api/checkin", autenticarToken, async (req, res) => {
+    let conexao;
+    let transacaoIniciada = false;
+
+    try {
+        conexao = await pool.connect();
+
+        const codigo = String(req.body.codigo || "")
+            .trim()
+            .toUpperCase();
+
+        if (!codigo) {
+            return res.status(400).json({
+                erro: "Informe o código da reserva."
+            });
+        }
+
+        await conexao.query("BEGIN");
+        transacaoIniciada = true;
+
+        // Atualiza primeiro os No-Shows vencidos deste cliente.
+        await atualizarNoShows(conexao, req.cliente.id);
+
+        const resultado = await conexao.query(
+            `SELECT id, codigo, status, checkin
+             FROM reservas
+             WHERE codigo = $1
+             AND cliente_id = $2
+             FOR UPDATE`,
+            [codigo, req.cliente.id]
+        );
+
+        if (resultado.rows.length === 0) {
+            await conexao.query("ROLLBACK");
+            transacaoIniciada = false;
+
+            return res.status(404).json({
+                erro: "Código de reserva não encontrado."
+            });
+        }
+
+        const reserva = resultado.rows[0];
+
+        if (reserva.status === "Cancelada por No-Show") {
+            await conexao.query("COMMIT");
+            transacaoIniciada = false;
+
+            return res.status(400).json({
+                erro: "O prazo para check-in terminou. A reserva foi cancelada por No-Show."
+            });
+        }
+
+        if (reserva.status !== "Paga") {
+            await conexao.query("ROLLBACK");
+            transacaoIniciada = false;
+
+            return res.status(400).json({
+                erro: "A reserva precisa estar paga para realizar o check-in."
+            });
+        }
+
+        if (reserva.checkin) {
+            await conexao.query("ROLLBACK");
+            transacaoIniciada = false;
+
+            return res.status(400).json({
+                erro: "O check-in desta reserva já foi realizado."
+            });
+        }
+
+        await conexao.query(
+            `UPDATE reservas
+             SET checkin = TRUE,
+                 status = 'Check-in realizado',
+                 checkin_em = CURRENT_TIMESTAMP
+             WHERE id = $1`,
+            [reserva.id]
+        );
+
+        await conexao.query("COMMIT");
+        transacaoIniciada = false;
+
+        res.json({
+            mensagem: "Check-in realizado com sucesso!"
+        });
+
+    } catch (erro) {
+        if (conexao && transacaoIniciada) {
+            await conexao.query("ROLLBACK");
+        }
+
+        console.error(erro);
+
+        res.status(500).json({
+            erro: "Erro ao realizar check-in."
+        });
+
+    } finally {
+        if (conexao) {
+            conexao.release();
+        }
+    }
+});
+
+// ==========================================
+// PÁGINAS INEXISTENTES
+// ==========================================
+
 app.use((req, res) => {
     res.status(404).send("Página não encontrada.");
 });
 
+// ==========================================
 // INICIAR SERVIDOR
+// ==========================================
+
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`Servidor funcionando na porta ${PORT}`);
 });
