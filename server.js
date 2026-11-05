@@ -153,7 +153,7 @@ app.post("/api/clientes", async (req, res) => {
             });
         }
 
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
             return res.status(400).json({
                 erro: "Informe um e-mail válido."
             });
