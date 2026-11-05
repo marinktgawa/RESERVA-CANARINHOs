@@ -1,8 +1,8 @@
 
 // ==========================================
 // RESERVA CANARINHO
-// Cadastro e login pela API
-// Demais funcionalidades temporariamente locais
+// Cadastro, login, reservas e mesas no PostgreSQL
+// Pagamento, check-in e espera temporariamente locais
 // ==========================================
 
 const CHAVE_CLIENTES = "canarinho_clientes";
@@ -44,10 +44,6 @@ function mensagem(id, texto, tipo = "") {
     }
 }
 
-function gerarCodigo() {
-    return "CANA-" + Math.floor(100000 + Math.random() * 900000);
-}
-
 function dataLegivel(data) {
     return new Date(data).toLocaleString("pt-BR");
 }
@@ -66,46 +62,39 @@ function escapar(texto) {
     });
 }
 
+function obterToken() {
+    return sessionStorage.getItem("canarinho_token");
+}
+
+function obterClienteLogado() {
+    try {
+        return JSON.parse(
+            sessionStorage.getItem("canarinho_cliente")
+        );
+    } catch {
+        return null;
+    }
+}
+
 // ==========================================
 // CLIENTES
 // ==========================================
 
-// Guarda somente os dados públicos do cliente.
-// Nunca guarda a senha no navegador.
-
 function guardarClienteLocal(cliente) {
     const clientes = ler(CHAVE_CLIENTES);
 
-    const existe = clientes.some(
-        item => item.email.toLowerCase() === cliente.email.toLowerCase()
+    const atualizados = clientes.filter(
+        item => item.email.toLowerCase() !== cliente.email.toLowerCase()
     );
 
-    if (!existe) {
-        clientes.push({
-            id: cliente.id,
-            nome: cliente.nome,
-            email: cliente.email,
-            telefone: cliente.telefone
-        });
-    } else {
-        const atualizados = clientes.map(item => {
-            if (item.email.toLowerCase() === cliente.email.toLowerCase()) {
-                return {
-                    id: cliente.id,
-                    nome: cliente.nome,
-                    email: cliente.email,
-                    telefone: cliente.telefone
-                };
-            }
+    atualizados.push({
+        id: cliente.id,
+        nome: cliente.nome,
+        email: cliente.email,
+        telefone: cliente.telefone
+    });
 
-            return item;
-        });
-
-        salvar(CHAVE_CLIENTES, atualizados);
-        return;
-    }
-
-    salvar(CHAVE_CLIENTES, clientes);
+    salvar(CHAVE_CLIENTES, atualizados);
 }
 
 function clienteExiste(email) {
@@ -246,6 +235,74 @@ if (formLogin) {
 }
 
 // ==========================================
+// CARREGAR RESERVAS DO POSTGRESQL
+// ==========================================
+
+async function carregarReservasServidor() {
+    const token = obterToken();
+
+    if (!token) {
+        return false;
+    }
+
+    try {
+        const resposta = await fetch("/api/reservas", {
+            headers: {
+                "Authorization": `Bearer ${token}`
+            }
+        });
+
+        const dados = await resposta.json();
+
+        if (!resposta.ok) {
+            if (resposta.status === 401) {
+                mensagem(
+                    "mensagemReserva",
+                    "Sua sessão expirou. Faça login novamente.",
+                    "erro"
+                );
+            }
+
+            return false;
+        }
+
+        const reservasAntigas = ler(CHAVE_RESERVAS);
+
+        const reservasAtualizadas = dados.map(reserva => {
+            // Preserva temporariamente os dados locais de pagamento
+            // e check-in até migrarmos essas funções para o banco.
+            const reservaLocal = reservasAntigas.find(
+                item => item.codigo === reserva.codigo
+            );
+
+            return {
+                codigo: reserva.codigo,
+                email: obterClienteLogado()?.email || "",
+                mesa: reserva.mesa_numero,
+                data: reserva.data_reserva,
+                status: reservaLocal?.status || reserva.status,
+                checkin: reservaLocal?.checkin || reserva.checkin,
+                criadoEm: reservaLocal?.criadoEm || "",
+                pagoEm: reservaLocal?.pagoEm || null,
+                checkinEm: reservaLocal?.checkinEm || null,
+                reembolso: Number(reserva.reembolso || 0),
+                percentualReembolso: PERCENTUAL_REEMBOLSO,
+                valorRetido: Number(reserva.valor_retido || 0),
+                percentualRetido: PERCENTUAL_RETIDO
+            };
+        });
+
+        salvar(CHAVE_RESERVAS, reservasAtualizadas);
+
+        return true;
+
+    } catch (erro) {
+        console.error("Erro ao carregar reservas:", erro);
+        return false;
+    }
+}
+
+// ==========================================
 // RESERVAS
 // ==========================================
 
@@ -267,7 +324,8 @@ function verificarNoShow() {
             return;
         }
 
-        const limite = new Date(reserva.data).getTime() + PRAZO_CHECKIN;
+        const limite =
+            new Date(reserva.data).getTime() + PRAZO_CHECKIN;
 
         if (agora > limite) {
             reserva.status = "Cancelada por No-Show";
@@ -290,59 +348,79 @@ function verificarNoShow() {
 }
 
 // ==========================================
-// MAPA DE MESAS
+// MAPA DE MESAS - POSTGRESQL
 // ==========================================
 
-function atualizarMapa() {
+async function atualizarMapa() {
     const mapa = document.getElementById("mapaMesas");
     const select = document.getElementById("mesaReserva");
 
     if (!mapa) return;
 
-    mapa.innerHTML = "";
+    try {
+        const resposta = await fetch("/api/mesas");
 
-    if (select) {
-        select.innerHTML =
-            '<option value="">Selecione uma mesa livre</option>';
-    }
-
-    for (let numero = 1; numero <= TOTAL_MESAS; numero++) {
-        const ocupada = reservaAtivaMesa(numero);
-
-        const botao = document.createElement("button");
-
-        botao.type = "button";
-        botao.className = ocupada ? "mesa ocupada" : "mesa livre";
-
-        botao.textContent = `Mesa ${numero}`;
-
-        botao.disabled = ocupada;
-
-        if (!ocupada) {
-            botao.addEventListener("click", () => {
-                if (select) {
-                    select.value = numero;
-                    mensagem("mensagemReserva", "");
-                }
-
-                mapa.querySelectorAll(".mesa").forEach(mesa => {
-                    mesa.classList.remove("selecionada");
-                });
-
-                botao.classList.add("selecionada");
-            });
-
-            if (select) {
-                const opcao = document.createElement("option");
-
-                opcao.value = numero;
-                opcao.textContent = `Mesa ${numero}`;
-
-                select.appendChild(opcao);
-            }
+        if (!resposta.ok) {
+            throw new Error("Erro ao consultar as mesas.");
         }
 
-        mapa.appendChild(botao);
+        const mesas = await resposta.json();
+
+        mapa.innerHTML = "";
+
+        if (select) {
+            select.innerHTML =
+                '<option value="">Selecione uma mesa livre</option>';
+        }
+
+        mesas.forEach(mesa => {
+            const ocupada = mesa.status === "Ocupada";
+
+            const botao = document.createElement("button");
+
+            botao.type = "button";
+            botao.className = ocupada
+                ? "mesa ocupada"
+                : "mesa livre";
+
+            botao.textContent = `Mesa ${mesa.numero}`;
+            botao.disabled = ocupada;
+
+            if (!ocupada) {
+                botao.addEventListener("click", () => {
+                    if (select) {
+                        select.value = mesa.numero;
+                        mensagem("mensagemReserva", "");
+                    }
+
+                    mapa.querySelectorAll(".mesa").forEach(item => {
+                        item.classList.remove("selecionada");
+                    });
+
+                    botao.classList.add("selecionada");
+                });
+
+                if (select) {
+                    const opcao = document.createElement("option");
+
+                    opcao.value = mesa.numero;
+                    opcao.textContent = `Mesa ${mesa.numero}`;
+
+                    select.appendChild(opcao);
+                }
+            }
+
+            mapa.appendChild(botao);
+        });
+
+    } catch (erro) {
+        console.error("Erro ao atualizar mapa:", erro);
+
+        mensagem(
+            "mensagemReserva",
+            "Não foi possível carregar as mesas.",
+            "erro"
+        );
     }
 }
 
@@ -420,14 +498,26 @@ function atualizarEspera() {
 }
 
 // ==========================================
-// FORMULÁRIO DE RESERVA
+// FORMULÁRIO DE RESERVA - POSTGRESQL
 // ==========================================
 
 const formReserva = document.getElementById("formReserva");
 
 if (formReserva) {
-    formReserva.addEventListener("submit", function(event) {
+    formReserva.addEventListener("submit", async function(event) {
         event.preventDefault();
+
+        const token = obterToken();
+        const cliente = obterClienteLogado();
+
+        if (!token || !cliente) {
+            mensagem(
+                "mensagemReserva",
+                "Faça login antes de realizar uma reserva.",
+                "erro"
+            );
+            return;
+        }
 
         const email = document.getElementById("clienteReserva")
             .value.trim().toLowerCase();
@@ -438,10 +528,10 @@ if (formReserva) {
 
         const data = document.getElementById("dataReserva").value;
 
-        if (!clienteExiste(email)) {
+        if (email !== cliente.email.toLowerCase()) {
             mensagem(
                 "mensagemReserva",
-                "Cliente não encontrado. Faça o cadastro primeiro.",
+                "Informe o e-mail da conta que está conectada.",
                 "erro"
             );
             return;
@@ -456,17 +546,6 @@ if (formReserva) {
             return;
         }
 
-        if (reservaAtivaMesa(mesa)) {
-            mensagem(
-                "mensagemReserva",
-                "Esta mesa já está reservada.",
-                "erro"
-            );
-
-            atualizarMapa();
-            return;
-        }
-
         if (new Date(data).getTime() <= Date.now()) {
             mensagem(
                 "mensagemReserva",
@@ -476,52 +555,61 @@ if (formReserva) {
             return;
         }
 
-        const reservas = ler(CHAVE_RESERVAS);
+        try {
+            const resposta = await fetch("/api/reservas", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    mesa_numero: mesa,
+                    data_reserva: new Date(data).toISOString()
+                })
+            });
 
-        const possuiReserva = reservas.some(reserva =>
-            reserva.email.toLowerCase() === email &&
-            ["Pendente", "Paga", "Check-in realizado"].includes(reserva.status)
-        );
+            const dados = await resposta.json();
 
-        if (possuiReserva) {
+            if (!resposta.ok) {
+                mensagem(
+                    "mensagemReserva",
+                    dados.erro || "Não foi possível realizar a reserva.",
+                    "erro"
+                );
+
+                await atualizarMapa();
+                return;
+            }
+
             mensagem(
                 "mensagemReserva",
-                "Este cliente já possui uma reserva ativa.",
+                `Reserva criada! Seu código é ${dados.reserva.codigo}. Confirme a caução de R$ 30,00.`,
+                "sucesso"
+            );
+
+            formReserva.reset();
+
+            await carregarReservasServidor();
+
+            atualizarReservas();
+            await atualizarMapa();
+
+        } catch (erro) {
+            console.error("Erro ao criar reserva:", erro);
+
+            mensagem(
+                "mensagemReserva",
+                "Não foi possível conectar ao servidor.",
                 "erro"
             );
-            return;
         }
-
-        const codigo = gerarCodigo();
-
-        reservas.push({
-            codigo,
-            email,
-            mesa,
-            data,
-            status: "Pendente",
-            checkin: false,
-            criadoEm: new Date().toISOString()
-        });
-
-        salvar(CHAVE_RESERVAS, reservas);
-
-        mensagem(
-            "mensagemReserva",
-            `Reserva criada! Seu código é ${codigo}. Confirme a caução de R$ 30,00.`,
-            "sucesso"
-        );
-
-        formReserva.reset();
-
-        atualizarMapa();
-        atualizarReservas();
     });
 }
 
 // ==========================================
 // FORMULÁRIO DE PAGAMENTO
 // CAUÇÃO DEMONSTRATIVA DE R$ 30,00
+// TEMPORARIAMENTE LOCAL
 // ==========================================
 
 const formPagamento = document.getElementById("formPagamento");
@@ -582,13 +670,13 @@ if (formPagamento) {
 
         formPagamento.reset();
 
-        atualizarMapa();
         atualizarReservas();
     });
 }
 
 // ==========================================
 // CHECK-IN
+// TEMPORARIAMENTE LOCAL
 // ==========================================
 
 const formCheckin = document.getElementById("formCheckin");
@@ -635,7 +723,6 @@ if (formCheckin) {
             );
 
             verificarNoShow();
-            atualizarMapa();
             atualizarReservas();
             return;
         }
@@ -654,13 +741,13 @@ if (formCheckin) {
 
         formCheckin.reset();
 
-        atualizarMapa();
         atualizarReservas();
     });
 }
 
 // ==========================================
 // FORMULÁRIO DA LISTA DE ESPERA
+// TEMPORARIAMENTE LOCAL
 // ==========================================
 
 const formEspera = document.getElementById("formEspera");
@@ -752,20 +839,22 @@ if (botaoPix) {
 // INICIALIZAÇÃO DAS PÁGINAS
 // ==========================================
 
-document.addEventListener("DOMContentLoaded", function() {
+document.addEventListener("DOMContentLoaded", async function() {
+    if (obterToken()) {
+        await carregarReservasServidor();
+    }
+
     verificarNoShow();
 
-    atualizarMapa();
     atualizarReservas();
     atualizarEspera();
 
-    // Atualizar informações a cada 15 segundos
-    setInterval(function() {
-        verificarNoShow();
+    await atualizarMapa();
 
-        atualizarMapa();
-        atualizarReservas();
-        atualizarEspera();
+    // Atualizar o mapa a cada 15 segundos
+    // As reservas são carregadas do banco ao abrir a página.
+    setInterval(async function() {
+        await atualizarMapa();
 
     }, 15000);
 

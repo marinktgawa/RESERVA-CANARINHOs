@@ -5,6 +5,7 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const path = require("path");
+const crypto = require("crypto");
 const pool = require("./database");
 
 const app = express();
@@ -46,7 +47,33 @@ app.get("/:pagina", (req, res, next) => {
     next();
 });
 
-// Testar o servidor e o banco
+// AUTENTICAÇÃO
+function autenticarToken(req, res, next) {
+    const cabecalho = req.headers.authorization;
+
+    if (!cabecalho || !cabecalho.startsWith("Bearer ")) {
+        return res.status(401).json({
+            erro: "Faça login para continuar."
+        });
+    }
+
+    const token = cabecalho.split(" ")[1];
+
+    try {
+        const dados = jwt.verify(token, process.env.JWT_SECRET);
+
+        req.cliente = dados;
+
+        next();
+
+    } catch (erro) {
+        return res.status(401).json({
+            erro: "Sessão expirada. Faça login novamente."
+        });
+    }
+}
+
+// TESTAR SERVIDOR E BANCO
 app.get("/api/health", async (req, res) => {
     try {
         await pool.query("SELECT NOW()");
@@ -57,6 +84,7 @@ app.get("/api/health", async (req, res) => {
 
     } catch (erro) {
         console.error(erro);
+
         res.status(500).json({
             erro: "Não foi possível acessar o banco."
         });
@@ -80,7 +108,7 @@ app.post("/api/clientes", async (req, res) => {
             });
         }
 
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
             return res.status(400).json({
                 erro: "Informe um e-mail válido."
             });
@@ -195,12 +223,150 @@ app.post("/api/login", async (req, res) => {
     }
 });
 
-// Rota para páginas inexistentes
+// CONSULTAR MESAS
+app.get("/api/mesas", async (req, res) => {
+    try {
+        const resultado = await pool.query(`
+            SELECT
+                m.numero,
+                CASE
+                    WHEN r.id IS NULL THEN 'Livre'
+                    ELSE 'Ocupada'
+                END AS status
+            FROM mesas m
+            LEFT JOIN reservas r
+                ON r.mesa_numero = m.numero
+                AND r.status IN (
+                    'Pendente',
+                    'Paga',
+                    'Check-in realizado'
+                )
+            ORDER BY m.numero
+        `);
+
+        res.json(resultado.rows);
+
+    } catch (erro) {
+        console.error(erro);
+
+        res.status(500).json({
+            erro: "Erro ao consultar as mesas."
+        });
+    }
+});
+
+// CONSULTAR RESERVAS DO CLIENTE LOGADO
+app.get("/api/reservas", autenticarToken, async (req, res) => {
+    try {
+        const resultado = await pool.query(
+            `SELECT
+                id,
+                codigo,
+                mesa_numero,
+                data_reserva,
+                status,
+                checkin,
+                reembolso,
+                valor_retido
+             FROM reservas
+             WHERE cliente_id = $1
+             ORDER BY data_reserva DESC`,
+            [req.cliente.id]
+        );
+
+        res.json(resultado.rows);
+
+    } catch (erro) {
+        console.error(erro);
+
+        res.status(500).json({
+            erro: "Erro ao consultar suas reservas."
+        });
+    }
+});
+
+// CRIAR RESERVA
+app.post("/api/reservas", autenticarToken, async (req, res) => {
+    try {
+        const { mesa_numero, data_reserva } = req.body;
+
+        const numeroMesa = Number(mesa_numero);
+
+        if (!Number.isInteger(numeroMesa) ||
+            numeroMesa < 1 ||
+            numeroMesa > 10) {
+            return res.status(400).json({
+                erro: "Selecione uma mesa válida."
+            });
+        }
+
+        if (!data_reserva) {
+            return res.status(400).json({
+                erro: "Informe a data e o horário da reserva."
+            });
+        }
+
+        const data = new Date(data_reserva);
+
+        if (Number.isNaN(data.getTime())) {
+            return res.status(400).json({
+                erro: "Informe uma data válida."
+            });
+        }
+
+        if (data.getTime() <= Date.now()) {
+            return res.status(400).json({
+                erro: "A reserva precisa ser para uma data futura."
+            });
+        }
+
+        const codigo = "CAN" +
+            crypto.randomBytes(4).toString("hex").toUpperCase();
+
+        const resultado = await pool.query(
+            `INSERT INTO reservas
+            (codigo, cliente_id, mesa_numero, data_reserva, status)
+            VALUES ($1, $2, $3, $4, 'Pendente')
+            RETURNING
+                id,
+                codigo,
+                mesa_numero,
+                data_reserva,
+                status`,
+            [
+                codigo,
+                req.cliente.id,
+                numeroMesa,
+                data.toISOString()
+            ]
+        );
+
+        res.status(201).json({
+            mensagem: "Reserva realizada com sucesso!",
+            reserva: resultado.rows[0]
+        });
+
+    } catch (erro) {
+        if (erro.code === "23505") {
+            return res.status(409).json({
+                erro: "Esta mesa ou este cliente já possui uma reserva ativa."
+            });
+        }
+
+        console.error(erro);
+
+        res.status(500).json({
+            erro: "Erro ao realizar reserva."
+        });
+    }
+});
+
+// ROTA PARA PÁGINAS INEXISTENTES
 app.use((req, res) => {
     res.status(404).send("Página não encontrada.");
 });
 
-// Iniciar servidor
+// INICIAR SERVIDOR
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`Servidor funcionando na porta ${PORT}`);
 });
