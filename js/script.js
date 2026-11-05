@@ -605,72 +605,81 @@ if (formReserva) {
         }
     });
 }
-
 // ==========================================
 // FORMULÁRIO DE PAGAMENTO
 // CAUÇÃO DEMONSTRATIVA DE R$ 30,00
-// TEMPORARIAMENTE LOCAL
+// POSTGRESQL
 // ==========================================
 
 const formPagamento = document.getElementById("formPagamento");
 
 if (formPagamento) {
-    formPagamento.addEventListener("submit", function(event) {
+    formPagamento.addEventListener("submit", async function(event) {
         event.preventDefault();
 
         const codigo = document.getElementById("reservaPagamento").value;
+        const token = obterToken();
 
-        const reservas = ler(CHAVE_RESERVAS);
-
-        const reserva = reservas.find(
-            item => item.codigo === codigo
-        );
-
-        if (!reserva) {
+        if (!token) {
             mensagem(
                 "mensagemPagamento",
-                "Selecione uma reserva válida.",
+                "Faça login para confirmar o pagamento.",
                 "erro"
             );
             return;
         }
 
-        if (reserva.status !== "Pendente") {
+        if (!codigo) {
             mensagem(
                 "mensagemPagamento",
-                "Esta reserva não está pendente.",
+                "Selecione uma reserva.",
                 "erro"
             );
             return;
         }
 
-        const limite =
-            new Date(reserva.data).getTime() + PRAZO_CHECKIN;
+        try {
+            const resposta = await fetch("/api/pagamentos", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({ codigo })
+            });
 
-        if (Date.now() > limite) {
+            const dados = await resposta.json();
+
+            if (!resposta.ok) {
+                mensagem(
+                    "mensagemPagamento",
+                    dados.erro || "Não foi possível confirmar o pagamento.",
+                    "erro"
+                );
+                return;
+            }
+
             mensagem(
                 "mensagemPagamento",
-                "O prazo para pagamento desta reserva terminou.",
+                dados.mensagem,
+                "sucesso"
+            );
+
+            formPagamento.reset();
+
+            await carregarReservasServidor();
+
+            atualizarReservas();
+
+        } catch (erro) {
+            console.error("Erro no pagamento:", erro);
+
+            mensagem(
+                "mensagemPagamento",
+                "Não foi possível conectar ao servidor.",
                 "erro"
             );
-            return;
         }
-
-        reserva.status = "Paga";
-        reserva.pagoEm = new Date().toISOString();
-        reserva.valorCaucao = VALOR_CAUCao;
-
-        salvar(CHAVE_RESERVAS, reservas);
-
-        mensagem(
-            "mensagemPagamento",
-            "Caução demonstrativa de R$ 30,00 confirmada com sucesso!",
-            "sucesso"
-        );
-
-        formPagamento.reset();
-
-        atualizarReservas();
     });
 }
 

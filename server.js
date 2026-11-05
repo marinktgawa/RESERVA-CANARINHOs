@@ -362,6 +362,91 @@ app.post("/api/reservas", autenticarToken, async (req, res) => {
 });
 
 // ROTA PARA PÁGINAS INEXISTENTES
+// ==========================================
+// CONFIRMAR PAGAMENTO - POSTGRESQL
+// CAUÇÃO DEMONSTRATIVA DE R$ 30,00
+// ==========================================
+
+app.post("/api/pagamentos", autenticarToken, async (req, res) => {
+    const conexao = await pool.connect();
+
+    try {
+        const { codigo } = req.body;
+
+        if (!codigo) {
+            return res.status(400).json({
+                erro: "Informe o código da reserva."
+            });
+        }
+
+        await conexao.query("BEGIN");
+
+        const resultado = await conexao.query(
+            `SELECT id, status
+             FROM reservas
+             WHERE codigo = $1
+             AND cliente_id = $2
+             FOR UPDATE`,
+            [codigo, req.cliente.id]
+        );
+
+        if (resultado.rows.length === 0) {
+            await conexao.query("ROLLBACK");
+
+            return res.status(404).json({
+                erro: "Reserva não encontrada."
+            });
+        }
+
+        const reserva = resultado.rows[0];
+
+        if (reserva.status !== "Pendente") {
+            await conexao.query("ROLLBACK");
+
+            return res.status(400).json({
+                erro: "Esta reserva não está pendente de pagamento."
+            });
+        }
+
+        await conexao.query(
+            `INSERT INTO pagamentos
+            (reserva_id, valor, forma_pagamento, status)
+            VALUES ($1, $2, $3, $4)`,
+            [
+                reserva.id,
+                30.00,
+                "PIX_DEMO",
+                "CONFIRMADO_SIMULADO"
+            ]
+        );
+
+        await conexao.query(
+            `UPDATE reservas
+             SET status = 'Paga',
+                 pago_em = CURRENT_TIMESTAMP
+             WHERE id = $1`,
+            [reserva.id]
+        );
+
+        await conexao.query("COMMIT");
+
+        res.json({
+            mensagem: "Caução demonstrativa de R$ 30,00 confirmada com sucesso!"
+        });
+
+    } catch (erro) {
+        await conexao.query("ROLLBACK");
+
+        console.error(erro);
+
+        res.status(500).json({
+            erro: "Erro ao confirmar pagamento."
+        });
+
+    } finally {
+        conexao.release();
+    }
+});
 app.use((req, res) => {
     res.status(404).send("Página não encontrada.");
 });
