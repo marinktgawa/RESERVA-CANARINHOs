@@ -487,4 +487,43 @@ footer {
     .mini-estatisticas {
         gap: 15px;
     }
+    .form-linha > div {
+    min-width: 0;
+}
+@media (max-width: 480px) {
+    .container {
+        padding: 24px 16px 40px;
+    }
+
+    .cartao {
+        padding: 20px;
+    }
+
+    .hero h1 {
+        letter-spacing: -1px;
+    }
+
+    .mini-estatisticas {
+        flex-wrap: wrap;
+    }
+
+    .grade-mesas {
+        gap: 10px;
+    }
+}
+input:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible {
+    outline: 3px solid var(--amarelo);
+    outline-offset: 3px;
+}
+.form-linha > div {
+    min-width: 0;
+}
+.form-linha > div {
+    min-width: 0;
+}
+.form-linha > div {
+    min-width: 0;
 }
